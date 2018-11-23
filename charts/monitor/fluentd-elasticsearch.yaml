@@ -1,4 +1,4 @@
-# chart-version: 1.0.3
+# chart-version: latest
 
 nameOverride: fluentd-elasticsearch
 
@@ -23,7 +23,9 @@ configMaps:
       host "#{ENV['OUTPUT_HOST']}"
       port "#{ENV['OUTPUT_PORT']}"
       logstash_format true
-      resurrect_after 5s
+      request_timeout 15s
+      reload_connections false
+      reload_on_failure false
       <buffer>
         @type file
         path /var/log/fluentd-buffers/kubernetes.system.buffer
