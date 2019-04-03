@@ -1,5 +1,5 @@
 # chart-repo: stable/prometheus
-# chart-version: 8.8.1
+# chart-version: 8.9.1
 # chart-ingress: false
 # chart-pvc: prometheus-server ReadWriteOnce 8Gi
 # chart-pvc: prometheus-alertmanager ReadWriteOnce 2Gi
@@ -46,8 +46,22 @@ alertmanager:
 serverFiles:
   ## Alerts configuration
   ## Ref: https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+<<<<<<< HEAD
   alerts: 
     groups:
+=======
+  alerts:
+    groups:
+      - name: InstanceCountChanged
+        rules:
+          - alert: InstanceCountChanged
+            expr: count (kube_node_labels{node=~"^.*$"}) - count (kube_node_labels{node=~"^.*$"} offset 2m) != 0
+            labels:
+              severity: Warning
+            annotations:
+              summary: 'Instance Count Changed'
+              description: 'The number of instances changed. (delta: {{ $value }})'
+>>>>>>> upstream/master
       - name: InstanceDown
         rules:
           - alert: InstanceDown
@@ -60,7 +74,7 @@ serverFiles:
       - name: HighCpuUsage
         rules:
           - alert: HighCpuUsage
-            expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{job="kubernetes-service-endpoints",mode="idle"}[5m])) * 100) > 10
+            expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{job="kubernetes-service-endpoints",mode="idle"}[5m])) * 100) > 70
             for: 5m
             labels:
               severity: Warning
@@ -70,24 +84,23 @@ serverFiles:
       - name: HighMemoryUsage
         rules:
           - alert: HighMemoryUsage
-            expr: (node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes - node_memory_Cached_bytes) / node_memory_MemTotal_bytes * 100 > 10
+            expr: (node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes - node_memory_Cached_bytes) / node_memory_MemTotal_bytes * 100 > 90
             for: 5m
             labels:
               severity: Warning
             annotations:
               summary: 'High Memory Usage(> 90%)'
               description: 'The memory usage of the instance({{ $labels.instance }}) has exceeds 90 percent for more than 5 minutes.'
-              
 
 alertmanagerFiles:
   alertmanager.yml:
     global:
-      slack_api_url: 'https://hooks.slack.com/services/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'
+      slack_api_url: 'https://hooks.slack.com/services/SLACK_TOKEN'
 
     receivers:
       - name: default-receiver
         slack_configs:
-          - channel: '@changyu.seon'
+          - channel: '#alerts'
             send_resolved: true
             username: '{{ template "slack.default.username" . }}'
             color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'

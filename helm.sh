@@ -266,6 +266,8 @@ helm_install() {
 
     create_namespace ${NAMESPACE}
 
+    EXTRA_VALUES=
+
     # helm check FAILED
     # COUNT=$(helm ls -a | grep ${NAME} | grep ${NAMESPACE} | grep "FAILED" | wc -l | xargs)
     # if [ "x${COUNT}" != "x0" ]; then
@@ -327,9 +329,37 @@ helm_install() {
         fi
     fi
 
+    # for cluster-autoscaler
+    if [ "${NAME}" == "cluster-autoscaler" ]; then
+        get_cluster_ip ${NAMESPACE} ${NAME}
+        if [ "${CLUSTER_IP}" != "" ]; then
+            EXTRA_VALUES="${EXTRA_VALUES} --set service.clusterIP=${CLUSTER_IP}"
+        fi
+    fi
+
     # for nginx-ingress
     if [ "${NAME}" == "nginx-ingress" ]; then
         get_base_domain
+
+        get_cluster_ip ${NAMESPACE} nginx-ingress-controller
+        if [ "${CLUSTER_IP}" != "" ]; then
+            EXTRA_VALUES="${EXTRA_VALUES} --set controller.service.clusterIP=${CLUSTER_IP}"
+
+            get_cluster_ip ${NAMESPACE} nginx-ingress-controller-metrics
+            if [ "${CLUSTER_IP}" != "" ]; then
+                EXTRA_VALUES="${EXTRA_VALUES} --set controller.metrics.service.clusterIP=${CLUSTER_IP}"
+            fi
+
+            get_cluster_ip ${NAMESPACE} nginx-ingress-controller-stats
+            if [ "${CLUSTER_IP}" != "" ]; then
+                EXTRA_VALUES="${EXTRA_VALUES} --set controller.stats.service.clusterIP=${CLUSTER_IP}"
+            fi
+
+            get_cluster_ip ${NAMESPACE} nginx-ingress-default-backend
+            if [ "${CLUSTER_IP}" != "" ]; then
+                EXTRA_VALUES="${EXTRA_VALUES} --set defaultBackend.service.clusterIP=${CLUSTER_IP}"
+            fi
+        fi
     fi
 
     # for efs-provisioner
@@ -340,6 +370,11 @@ helm_install() {
     # for k8s-spot-termination-handler
     if [ "${NAME}" == "k8s-spot-termination-handler" ]; then
         replace_chart ${CHART} "SLACK_URL"
+    fi
+
+    # for prometheus
+    if [ "${NAME}" == "prometheus" ]; then
+        replace_chart ${CHART} "SLACK_TOKEN"
     fi
 
     # for vault
@@ -492,10 +527,10 @@ helm_install() {
     # helm install
     if [ "${VERSION}" == "" ] || [ "${VERSION}" == "latest" ]; then
         _command "helm upgrade --install ${NAME} ${REPO} --namespace ${NAMESPACE} --values ${CHART}"
-        helm upgrade --install ${NAME} ${REPO} --namespace ${NAMESPACE} --values ${CHART}
+        helm upgrade --install ${NAME} ${REPO} --namespace ${NAMESPACE} --values ${CHART} ${EXTRA_VALUES}
     else
         _command "helm upgrade --install ${NAME} ${REPO} --namespace ${NAMESPACE} --values ${CHART} --version ${VERSION}"
-        helm upgrade --install ${NAME} ${REPO} --namespace ${NAMESPACE} --values ${CHART} --version ${VERSION}
+        helm upgrade --install ${NAME} ${REPO} --namespace ${NAMESPACE} --values ${CHART} --version ${VERSION} ${EXTRA_VALUES}
     fi
 
     # config save
@@ -723,6 +758,10 @@ create_cluster_role_binding() {
         SECRET=$(kubectl get secret -n ${_NAMESPACE} | grep ${_ACCOUNT}-token | awk '{print $1}')
         kubectl describe secret ${SECRET} -n ${_NAMESPACE} | grep 'token:'
     fi
+}
+
+get_cluster_ip() {
+    CLUSTER_IP=$(kubectl get svc -n ${1} -o json | jq -r ".items[] | select(.metadata.name == \"${2}\") | .spec.clusterIP")
 }
 
 default_pdb() {
@@ -1214,6 +1253,7 @@ istio_init() {
     fi
 
     ISTIO_DIR=${ISTIO_TMP}/${NAME}-${VERSION}/install/kubernetes/helm/istio
+
 }
 
 istio_secret() {
@@ -1307,10 +1347,40 @@ EOF
 #    ls -aslF ${KUBECFG_ENV_FILE}
 }
 
+waiting_istio_init() {
+    SEC=10
+    RET=0
+    IDX=0
+    while true; do
+        RET=$(echo -e `kubectl get crds | grep 'istio.io\|certmanager.k8s.io' | wc -l`)
+        echo ${RET}
+
+        if [ ${RET} -gt 52 ]; then
+            echo "init ok"
+            break
+        elif [ "x${IDX}" == "x${SEC}" ]; then
+            _result "Timeout"
+            break
+        fi
+
+        IDX=$(( ${IDX} + 1 ))
+        sleep 2
+    done
+}
+
 istio_install() {
     istio_init
 
     create_namespace ${NAMESPACE}
+
+    # istio 1.1.x init
+    if [[ "${VERSION}" == "1.1."* ]]; then
+        _command "helm upgrade --install ${ISTIO_DIR}-init --name istio-init --namespace ${NAMESPACE}"
+        helm upgrade --install istio-init ${ISTIO_DIR}-init --namespace ${NAMESPACE}
+
+        # result will be more than 53
+        waiting_istio_init
+    fi
 
     CHART=${SHELL_DIR}/build/${CLUSTER_NAME}/${NAME}.yaml
     get_template charts/istio/${NAME}.yaml ${CHART}
@@ -1445,6 +1515,9 @@ istio_delete() {
     # helm delete
     _command "helm delete --purge ${NAME}"
     helm delete --purge ${NAME}
+
+    _command "helm del --purge istio-init"
+    helm del --purge istio-init
 
     # delete crds
     LIST="$(kubectl get crds | grep istio.io | awk '{print $1}')"

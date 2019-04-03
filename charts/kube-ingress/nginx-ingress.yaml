@@ -1,13 +1,15 @@
 # chart-repo: stable/nginx-ingress
-# chart-version: 1.2.1
+# chart-version: 1.4.0
 
 nameOverride: nginx-ingress
 
 controller:
-  kind: DaemonSet
-  # replicaCount: 3
-  # autoscaling:
-  #   enabled: true
+  # kind: DaemonSet
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 11
   # podAnnotations:
   #   cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
   config:
